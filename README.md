@@ -18,5 +18,5 @@ This project integrates EfficientNet B6 and Vision Transformer (ViT) for advance
 Contributions are welcome! Please fork the repository and submit pull requests with your enhancements.
 
 ## Contact
-[Vignesh Sivakumar] - [vsivakumar@augusta.edu] - [https://github.com/knoxrm]
+Vignesh Sivakumar - [vsivakumar@augusta.edu] - [https://github.com/knoxrm]
 
