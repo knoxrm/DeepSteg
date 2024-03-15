@@ -7,7 +7,7 @@ This project integrates EfficientNet B6 and Vision Transformer (ViT) for advance
 Install dependencies: `./setup.sh`
 
 ## Usage
-- To train the model: `python train_models.py --model efficientnet-b6 --batch_size 32 --checkpoint_dir checkpoints/`
+To train the model: `python train_models.py --model efficientnet-b6 --batch_size 32 --checkpoint_dir checkpoints/`
 
 ## Features
 - Integration of EfficientNet B6 and ViT for robust steganalysis
