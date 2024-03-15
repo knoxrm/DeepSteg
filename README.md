@@ -4,7 +4,7 @@
 This project integrates EfficientNet B6 and Vision Transformer (ViT) for advanced image steganalysis. Aimed at detecting hidden information within digital images, our approach leverages the strengths of both architectures to improve detection accuracy and efficiency.
 
 ## Installation
-2. Install dependencies: `./setup.sh`
+Install dependencies: `./setup.sh`
 
 ## Usage
 - To train the model: `python train_models.py --model efficientnet-b6 --batch_size 32 --checkpoint_dir checkpoints/`
