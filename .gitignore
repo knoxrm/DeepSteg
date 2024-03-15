@@ -1,0 +1,6 @@
+splits/
+pickleTest.py
+*.pt
+*.out
+*.txt
+
