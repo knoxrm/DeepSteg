@@ -1,4 +1,4 @@
-# Project Steganalysis with EfficientNet and Vision Transformer
+# Steganalysis with EfficientNet and Vision Transformer
 
 ## Overview
 This project integrates EfficientNet B6 and Vision Transformer (ViT) for advanced image steganalysis. Aimed at detecting hidden information within digital images, our approach leverages the strengths of both architectures to improve detection accuracy and efficiency.
