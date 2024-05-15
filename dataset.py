@@ -83,8 +83,8 @@ class TrainRetriever(Dataset):
             sample = self.transforms(**sample)
             image = sample['image']
 
-        target = onehot(4, label)
-        return image, target, image_name
+        target = onehot(2, label)
+        return image, target
 
     def __len__(self) -> int:
         return self.image_names.shape[0]

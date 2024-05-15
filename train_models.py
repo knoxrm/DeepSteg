@@ -21,17 +21,18 @@ from dataset import *
 from Earlystopping import EarlyStopping
 # from srnet import srnet, SRNetEncoder
 from models import get_net
+import albumentations
 from albumentations.pytorch.transforms import ToTensorV2
 from albumentations import (
-    Compose, HorizontalFlip, CLAHE, HueSaturationValue,
-    RandomBrightness, RandomContrast, RandomGamma, OneOf, Resize,
+    OneOf, Resize,
     ToFloat, ShiftScaleRotate, GridDistortion, RandomRotate90,
-    RGBShift, RandomBrightness, RandomContrast, Blur, MotionBlur, MedianBlur, GaussNoise, CoarseDropout,
-    IAAAdditiveGaussianNoise, GaussNoise, OpticalDistortion, RandomSizedCrop, VerticalFlip
+    RGBShift, Blur, MotionBlur, MedianBlur, GaussNoise, CoarseDropout,
+    # IAAAdditiveGaussianNoise
+    GaussNoise, OpticalDistortion, RandomSizedCrop, VerticalFlip
 )
 from utils import *
 from surgery import *
-from albumentations.augmentations.dropout import Cutout
+# from albumentations.augmentations.dropout import Cutout
 import wandb
 import pickle
 import random
@@ -45,14 +46,14 @@ arg('--checkpoint_dir', type=str, help='Directory to save checkpoints')
 arg('--surgery', type=int, default=1, help='modification level')
 patience=10
 args = parser.parse_args()
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
+# os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
 
 # data_dir = '../input/alaska2-image-steganalysis'
-folder_names = ['JMiPOD/', 'JUNIWARD/', 'UERD/']
-class_names = ['Normal', 'JMiPOD_75', 'JMiPOD_90', 'JMiPOD_95', 
-               'JUNIWARD_75', 'JUNIWARD_90', 'JUNIWARD_95',
-                'UERD_75', 'UERD_90', 'UERD_95']
-class_labels = { name: i for i, name in enumerate(class_names)}
+# folder_names = ['JMiPOD/', 'JUNIWARD/', 'UERD/']
+# class_names = ['Normal', 'JMiPOD_75', 'JMiPOD_90', 'JMiPOD_95', 
+#                'JUNIWARD_75', 'JUNIWARD_90', 'JUNIWARD_95',
+#                 'UERD_75', 'UERD_90', 'UERD_95']
+# class_labels = { name: i for i, name in enumerate(class_names)}
 
 
 def setup(rank, world_size):
@@ -142,17 +143,17 @@ def train_model(model, train_loader, val_loader, batch_size, device, checkpoint_
         summary_loss = AverageMeter()
         final_scores = RocAucMeter()
         # with tqdm(train_loader, disable=True, total=int(len(train_loader))) as tk0:
-        with tqdm(train_loader, disable=not master_process, total=int(len(train_loader))) as tk0:
+        with tqdm(train_loader, disable=True, total=int(len(train_loader))) as tk0:
         # with tqdm(train_loader, total=int(len(train_loader))) as tk0:
-            for step, (images, targets, image_names) in enumerate(tk0):
-                # if dist.get_rank() == 0 and step == 10:
+            for step, (images, targets) in enumerate(tk0):
+                # if step == 10:
                 #     # Master process checks the condition, e.g., early stopping
                 #     should_stop = True
                 # stop_tensor = torch.tensor(should_stop, dtype=torch.int64).to(device)
 
                 targets = targets.to(device).float()
                 images = images.to(device).float()
-                batch_size = images.shape[0]
+                # batch_size = images.shape[0]
 
                 optimizer.zero_grad()
                 outputs = model(images)
@@ -253,9 +254,9 @@ def train_model(model, train_loader, val_loader, batch_size, device, checkpoint_
             summary_loss = AverageMeter()
             final_scores = RocAucMeter()
             with torch.no_grad():
-                for step, (images, targets, image_names) in enumerate(val_loader):
+                for step, (images, targets) in enumerate(val_loader):
                     targets = targets.to(device).float()
-                    batch_size = images.shape[0]
+                    # batch_size = images.shape[0]
                     images = images.to(device).float()
                     outputs = model(images)
                     loss = criterion(outputs, targets)
@@ -379,7 +380,9 @@ def main(rank, world_size):
         with open('splits/IL_val_'+QF+'.p', 'rb') as handle:
             IL_val.extend(pickle.load(handle))
 
-    for label, kind in enumerate(Classes):
+    # for label, kind in enumerate(Classes):
+    for kind in Classes: 
+        label = 1 if kind != 'Cover' else 0
         for path in IL_train:
             dataset.append({
                 'kind': kind,
@@ -387,7 +390,8 @@ def main(rank, world_size):
                 'label': label,
                 'fold':1,
             })
-    for label, kind in enumerate(Classes):
+    for kind in Classes: 
+        label = 1 if kind != 'Cover' else 0
         for path in IL_val:
             dataset.append({
                 'kind': kind,
@@ -441,7 +445,7 @@ def main(rank, world_size):
     train_model(model, train_loader, val_loader, args.batch_size, device, args.checkpoint_dir)
 
 if __name__ == "__main__":
-    world_size = 3
+    world_size = 2
     
     mp.spawn(
         main,

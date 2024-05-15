@@ -4,3 +4,9 @@ pickleTest.py
 *.out
 *.txt
 *.zip
+Test/
+__pycache__/
+alaska2/
+checkpoints/
+wandb/
+old_checkpts/
