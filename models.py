@@ -67,7 +67,7 @@ class EfficientNetCvT(nn.Module):
 
         # Vision Transformer
         hidden_dim = 512
-        self.patch_size = 1
+        self.patch_size = 2
         self.patch_embed = nn.Linear(1280, hidden_dim)
         self.cls_token = nn.Parameter(torch.randn(1, 1, hidden_dim))
         self.pos_embed = nn.Parameter(torch.randn(1, 16 * 16 + 1, hidden_dim))
@@ -76,45 +76,11 @@ class EfficientNetCvT(nn.Module):
             for _ in range(6)
         ])
         self.norm = nn.LayerNorm(hidden_dim)
-        self.fc = nn.Linear(hidden_dim, 2)
-
-        # Calculate the number of patches
-        # self.image_size = 16 
-        # self.patch_size = 4  # Adjust as needed
-        #
-        # out_channels = 144
-        # self.vit = ViTModel.from_pretrained('google/vit-base-patch16-224')
-        # self.feature_extractor = ViTFeatureExtractor.from_pretrained('google/vit-base-patch16-224')
-        # # self.cross_projection = nn.MultiheadAttention(embed_dim=feature_size, kdim=768, vdim=768, num_heads=8).to("cuda")
-        # self.cross_projection = nn.MultiheadAttention(embed_dim=768, num_heads=8).to("cuda")
-        # self.query_projection = nn.Linear(feature_size, 768).to("cuda")
-        # self.key_value_projection = nn.Linear(768, 768).to("cuda")
-        # Define the CvT component
-        # self.Vit = VisionTransformer(
-        #     image_size=self.image_size,
-        #     patch_size=self.patch_size,
-        #     num_layers=4,
-        #     num_heads=4,
-        #     hidden_dim=feature_size,
-        #     mlp_dim=4 * feature_size,
-        #     dropout=0.1,
-        #     attention_dropout=0.1,
-        #     num_classes=4,
-        #     representation_size=None,
-        #     norm_layer=partial(nn.LayerNorm, eps=1e-6),
-            # Add conv_stem_configs if required
-        # )
-        # self.conv = nn.Conv2d(2304, out_channels, kernel_size=4, stride=1, padding=0)
-        # self.classifier = nn.Linear(2304, 4) 
-        # self.linear_projection = nn.Linear(1280 + 768, 768)  # Adjust dimensions as needed
-        # self.adapt_conv = ProjectionHead(2304,1152, 3)
-        # self.adapt_conv = nn.Conv2d(2304, 3, kernel_size=1, stride=1, padding=0)
-        # self.final_conv = nn.Conv2d(144, 4, kernel_size=1, stride=1, padding=0)
-        
-
+        self.fc = nn.Linear(hidden_dim, 1)
 
     def forward(self, x):
         features = self.backbone.extract_features(x)
+        # print(features.shape)
         # features = self.efficientnet(x)
         patches = rearrange(features, 'b c h w -> b (h w) c')
         patches = self.patch_embed(patches)
@@ -128,6 +94,7 @@ class EfficientNetCvT(nn.Module):
         patches = self.norm(patches)
         cls_token_final = patches[:, 0]
         output = self.fc(cls_token_final)
+        # print(output.shape)
         
         return output
     #

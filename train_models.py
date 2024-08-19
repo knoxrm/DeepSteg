@@ -42,6 +42,7 @@ arg = parser.add_argument
 arg('--model', type=str, default='mixnet_s', help='Name of the model to use (e.g., efficientnetB2, mixnet_s)')
 arg('--batch_size', type=int, help='Batch size for training and validation')
 arg('--checkpoint_dir', type=str, help='Directory to save checkpoints')
+arg('--save_file', type=str,default=None, help='Path to the saved model checkpoint')
 # arg('--use_mish', action='store_true', help='Use Mish activation (default: False)')
 arg('--surgery', type=int, default=1, help='modification level')
 patience=10
@@ -104,12 +105,13 @@ def train_model(model, train_loader, val_loader, batch_size, device, checkpoint_
     flag_tensor = torch.zeros(1).to(device)
     ddp_rank = torch.distributed.get_rank()
     master_process = ddp_rank == 0
-    criterion = nn.CrossEntropyLoss()
-    #criterion = nn.BCEWithLogitsLoss()
+    # criterion = nn.CrossEntropyLoss()
+    # criterion = nn.BCELoss()
+    criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.AdamW(
         model.parameters(),
-        weight_decay=1e-3,
-        lr=1e-8)
+        weight_decay=1e-2,
+        lr=1e-4)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             optimizer,
             mode='min',
@@ -128,6 +130,7 @@ def train_model(model, train_loader, val_loader, batch_size, device, checkpoint_
     for epoch in range(num_epochs):
         rank = torch.distributed.get_rank()
         if rank == 0:
+            log_file = open(f"logs/train_epoch{epoch}_logs.txt", "w")
             print('Train Epoch {}/{}'.format(epoch + 1, num_epochs))
             print('-' * 10)
         model.train()
@@ -142,9 +145,11 @@ def train_model(model, train_loader, val_loader, batch_size, device, checkpoint_
         should_stop = False
         summary_loss = AverageMeter()
         final_scores = RocAucMeter()
-        # with tqdm(train_loader, disable=True, total=int(len(train_loader))) as tk0:
+        
         with tqdm(train_loader, disable=True, total=int(len(train_loader))) as tk0:
+        # with tqdm(train_loader, disable=not master_process, total=int(len(train_loader))) as tk0:
         # with tqdm(train_loader, total=int(len(train_loader))) as tk0:
+            log_file.write(f"Training Loop: Epoch {epoch}\n")
             for step, (images, targets) in enumerate(tk0):
                 # if step == 10:
                 #     # Master process checks the condition, e.g., early stopping
@@ -156,21 +161,29 @@ def train_model(model, train_loader, val_loader, batch_size, device, checkpoint_
                 # batch_size = images.shape[0]
 
                 optimizer.zero_grad()
+                # print(targets.shape)
                 outputs = model(images)
                 loss = criterion(outputs, targets)
                 loss.backward()
-                final_scores.update(targets, outputs)
-                summary_loss.update(loss.detach().item(), batch_size)
                 optimizer.step()
                 # Synchronize and broadcast the decision
                 # dist.barrier()
                 # dist.broadcast(stop_tensor, src=0)
-                _, predicted = torch.max(outputs.data, 1)  # Get the predicted classes
-                targets_cpy = targets.clone()
-                # Convert one-hot encoded targets to class indices
-                if targets_cpy.dim() > 1 and targets_cpy.size(1) > 1:  # Check if targets are one-hot encoded
-                    targets_cpy = torch.argmax(targets_cpy, dim=1)
+                # _, predicted = torch.max(outputs.data, 1)  # Get the predicted classes
+                # targets_cpy = targets.clone()
+                # # Convert one-hot encoded targets to class indices
+                # if targets_cpy.dim() > 1 and targets_cpy.size(1) > 1:  # Check if targets are one-hot encoded
+                #     targets_cpy = torch.argmax(targets_cpy, dim=1)
+                #
+                #
+                # if predicted.shape != targets_cpy.shape:
+                #     raise ValueError(f"Shape mismatch: Predicted shape {predicted.shape}, Targets shape {targets_cpy.shape}")
+                #
+                # Apply a threshold to obtain the predicted classes
+                predicted = (outputs > 0.5).float().squeeze()
 
+                # Squeeze the targets tensor to remove the extra dimension
+                targets_cpy = targets.squeeze()
 
                 if predicted.shape != targets_cpy.shape:
                     raise ValueError(f"Shape mismatch: Predicted shape {predicted.shape}, Targets shape {targets_cpy.shape}")
@@ -180,16 +193,23 @@ def train_model(model, train_loader, val_loader, batch_size, device, checkpoint_
                 total_samples += targets_cpy.size(0)
 
                 # Calculate precision for the batch
-                precision = precision_score(targets_cpy.cpu(), predicted.cpu(), average='macro', zero_division=0)
+                precision = precision_score(targets_cpy.cpu(), predicted.cpu(), average='binary', zero_division=0)
                 precisions.append(precision)
 
                 accuracy = 100 * correct / targets.size(0)  # Batch accuracy
                 total_accuracy = 100 * total_correct / total_samples  # Cumulative accuracy
                 epoch_precision = sum(precisions) / len(precisions)  # Cumulative precision
 
-                tk0.set_postfix(loss=loss.item(), batch_acc=accuracy, total_acc=total_accuracy, lr=optimizer.param_groups[0]['lr'])
+                final_scores.update(targets_cpy, outputs.squeeze())
+                if dist.is_initialized():
+                    final_scores.sync_score(device)
 
-                tk0.update()
+                # final_scores.update(targets, outputs)
+                summary_loss.update(loss.detach().item(), batch_size)
+                if dist.get_rank() == 0:
+                    log_file.write(f"Epoch: {epoch + 1}, Step: {step + 1}, Loss: {loss}, Accuracy: {accuracy}, total_accuracy: {total_accuracy}, epoch_precision: {epoch_precision}, lr: {optimizer.param_groups[0]['lr']}\n")
+                    tk0.set_postfix(loss=loss.item(), wauc=final_scores.avg, batch_acc=accuracy, total_acc=total_accuracy, lr=optimizer.param_groups[0]['lr'])
+                    tk0.update()
                 # if stop_tensor.item() == 1:
                 #     break
                 # dist.all_reduce(flag_tensor, op=dist.ReduceOp.SUM)
@@ -215,6 +235,7 @@ def train_model(model, train_loader, val_loader, batch_size, device, checkpoint_
         summary_loss.count = count_tensor.item()
         summary_loss.avg = summary_loss.sum / summary_loss.count
         if dist.get_rank() == 0:
+            log_file.close()
             num_processes = dist.get_world_size()
             average_batch_accuracy = (local_batch_accuracy / num_processes).item()
             average_total_accuracy = (local_total_accuracy / num_processes).item()
@@ -235,6 +256,7 @@ def train_model(model, train_loader, val_loader, batch_size, device, checkpoint_
         # wandb.log({"epoch": epoch, "summary_loss": summary_loss, "final_scores": final_scores})
         # print("debug")
 
+        log_file = open(f"logs/Val_epoch{epoch}_logs.txt", "w")
         correct = 0 
         total_correct = 0 
         total_samples = 0 
@@ -242,9 +264,11 @@ def train_model(model, train_loader, val_loader, batch_size, device, checkpoint_
         targets_cpy = []
         precision = 0
         total_accuracy = 0
-        if rank == 0:
+        if dist.get_rank() == 0:
+            log_file.write(f"Validation Loop: Epoch {epoch}\n")
             print('Val Epoch {}/{}'.format(epoch + 1, num_epochs))
             print('-' * 10)
+        # with tqdm(unit='it', total=len(val_loader), disable=not master_process) as pbar:
         with tqdm(unit='it', total=len(val_loader), disable=True) as pbar:
         # with tqdm(unit='it', total=len(val_loader), disable=not master_process) as pbar:
         # # with tqdm(desc='Epoch %d - ' % epoch, unit='it', total=len(val_loader)) as pbar:
@@ -256,20 +280,26 @@ def train_model(model, train_loader, val_loader, batch_size, device, checkpoint_
             with torch.no_grad():
                 for step, (images, targets) in enumerate(val_loader):
                     targets = targets.to(device).float()
-                    # batch_size = images.shape[0]
                     images = images.to(device).float()
+
                     outputs = model(images)
                     loss = criterion(outputs, targets)
                     running_loss += loss.item()
-                    pbar.set_postfix(loss=(loss.item()))
-                    # Apply sigmoid to each output score
-                    probabilities = torch.sigmoid(outputs)
-                    _, predicted = torch.max(outputs.data, 1)  # Get the predicted classes
-                    targets_cpy = targets.clone()
-                    # Convert one-hot encoded targets to class indices
-                    if targets_cpy.dim() > 1 and targets_cpy.size(1) > 1:  # Check if targets are one-hot encoded
-                        targets_cpy = torch.argmax(targets_cpy, dim=1)
+                    # _, predicted = torch.max(outputs.data, 1)  # Get the predicted classes
+                    # targets_cpy = targets.clone()
+                    # # Convert one-hot encoded targets to class indices
+                    # if targets_cpy.dim() > 1 and targets_cpy.size(1) > 1:  # Check if targets are one-hot encoded
+                    #     targets_cpy = torch.argmax(targets_cpy, dim=1)
+                    #
+                    #
+                    # if predicted.shape != targets_cpy.shape:
+                    #     raise ValueError(f"Shape mismatch: Predicted shape {predicted.shape}, Targets shape {targets_cpy.shape}")
 
+                    # Apply a threshold to obtain the predicted classes
+                    predicted = (outputs > 0.5).float().squeeze()
+
+                    # Squeeze the targets tensor to remove the extra dimension
+                    targets_cpy = targets.squeeze()
 
                     if predicted.shape != targets_cpy.shape:
                         raise ValueError(f"Shape mismatch: Predicted shape {predicted.shape}, Targets shape {targets_cpy.shape}")
@@ -279,16 +309,21 @@ def train_model(model, train_loader, val_loader, batch_size, device, checkpoint_
                     total_samples += targets_cpy.size(0)
 
                     # Calculate precision for the batch
-                    precision = precision_score(targets_cpy.cpu(), predicted.cpu(), average='macro', zero_division=0)
+                    precision = precision_score(targets_cpy.cpu(), predicted.cpu(), average='binary', zero_division=0)
                     precisions.append(precision)
 
                     accuracy = 100 * correct / targets.size(0)  # Batch accuracy
-                    total_accuracy = 100 * total_correct / total_samples  # Cumulative accuracy
-
-                    # Apply threshold to determine predictions
-                    final_scores.update(targets, outputs)
+                    total_accuracy = 100 * total_correct / total_samples  # Cumulative Accuracy
+                    final_scores.update(targets_cpy, outputs.squeeze())
                     summary_loss.update(loss.detach().item(), batch_size)
-                    pbar.update()
+                    if dist.is_initialized():
+                        final_scores.sync_score(device)
+
+                    if dist.get_rank() == 0:
+                        log_file.write(f"Epoch: {epoch + 1}, Step: {step + 1}, Loss: {loss}, Accuracy: {accuracy}, total_accuracy: {total_accuracy}, epoch_precision: {epoch_precision}, lr: {optimizer.param_groups[0]['lr']}\n")
+                        # Apply threshold to determine predictions
+                        pbar.set_postfix(loss=(loss.item()), wauc=final_scores.avg)
+                        pbar.update()
 
 
 
@@ -315,7 +350,8 @@ def train_model(model, train_loader, val_loader, batch_size, device, checkpoint_
         # dist.all_reduce(torch.tensor(summary_loss.sum).to(device), op=dist.ReduceOp.SUM)
         # dist.all_reduce(torch.tensor(summary_loss.count).to(device), op=dist.ReduceOp.SUM)
         # epoch_precision = sum(precisions) / len(precisions)  # Cumulative precision
-        if rank == 0:
+        if dist.get_rank() == 0:
+            log_file.close()
             num_processes = dist.get_world_size()
             average_batch_accuracy = (local_batch_accuracy / num_processes).item()
             average_total_accuracy = (local_total_accuracy / num_processes).item()
@@ -411,6 +447,10 @@ def main(rank, world_size):
                 output_device=rank,
                 find_unused_parameters=False)
 
+    # if args.save_file is Not None:
+    #     chkpt = torch.load(args.save_file, map_location=device)
+    #     model_state = chkpt['model_state']
+
     train_dataset = TrainRetriever(
         kinds=dataset[dataset['fold'] != 0].kind.values,
         image_names=dataset[dataset['fold'] != 0].image_name.values,
@@ -445,7 +485,7 @@ def main(rank, world_size):
     train_model(model, train_loader, val_loader, args.batch_size, device, args.checkpoint_dir)
 
 if __name__ == "__main__":
-    world_size = 2
+    world_size = 1
     
     mp.spawn(
         main,

@@ -51,10 +51,11 @@ def get_valid_transforms():
             ToTensorV2(p=1.0),
         ], p=1.0)
 
-def onehot(size, target):
-    vec = torch.zeros(size, dtype=torch.float32)
-    vec[target] = 1.
-    return vec
+def onehot(target):
+    return torch.tensor([float(target)], dtype=torch.float32)
+    # vec = torch.zeros(size, dtype=torch.float32)
+    # vec[target] = 1.
+    # return vec
 
 class TrainRetriever(Dataset):
 
@@ -83,7 +84,7 @@ class TrainRetriever(Dataset):
             sample = self.transforms(**sample)
             image = sample['image']
 
-        target = onehot(2, label)
+        target = onehot(label)
         return image, target
 
     def __len__(self) -> int:

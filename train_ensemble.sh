@@ -5,4 +5,5 @@
 # python train_models.py --model efficientnet-b5 --batch_size 64 --checkpoint_dir checkpoints/
 # python train_models.py --model efficientnet-b6 --batch_size 64 --checkpoint_dir checkpoints/
 # python train_models.py --model efficientnet-b7 --batch_size 64 --checkpoint_dir checkpoints/
+# python train_models.py --model efficientnet-b0 --batch_size 128 --save_dir best_chkpt/epoch_5.pth --checkpoint_dir checkpoints/
 python train_models.py --model efficientnet-b0 --batch_size 128 --checkpoint_dir checkpoints/

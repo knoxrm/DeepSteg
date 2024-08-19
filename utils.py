@@ -99,17 +99,25 @@ class RocAucMeter(object):
         self.reset()
 
     def reset(self):
-        self.y_true = np.array([0,1])
-        self.y_pred = np.array([0.5,0.5])
-        self.score = torch.tensor(0.0)
+        self.y_true = np.array([])
+        self.y_pred = np.array([])
+        self.score = 0.0
 
     def update(self, y_true, y_pred):
-        y_true = y_true.cpu().numpy().argmax(axis=1).clip(min=0, max=1).astype(int)
-        y_pred = 1 - nn.functional.softmax(y_pred.double(), dim=1).data.cpu().numpy()[:,0]
+        # y_true = y_true.cpu().numpy().argmax(axis=1).clip(min=0, max=1).astype(int)
+        y_true = y_true.cpu().numpy()
+        y_pred = y_pred.detach().cpu().numpy()
+
+        if y_pred.ndim == 1:
+            y_pred = 1 - y_pred
+        else:
+            # y_pred = 1 - nn.functional.softmax(y_pred.double(), dim=1).data.cpu().numpy()[:,0]
+            y_pred = 1 - nn.functional.softmax(torch.from_numpy(y_pred).double(), dim=1).numpy()[:, 0]
+
         self.y_true = np.hstack((self.y_true, y_true))
         self.y_pred = np.hstack((self.y_pred, y_pred))
-        self.score = torch.tensor(wauc(self.y_true, self.y_pred))
-        # sync_score()
+        self.score = torch.tensor(wauc(self.y_true, self.y_pred)).detach().item()
+        self.sync_score(device="cuda")
 
     def sync_score(self, device):
         """
@@ -118,8 +126,8 @@ class RocAucMeter(object):
         """
 
         # Summing up scores from all processes
-        # sum_score = torch.tensor(self.score).detach().clone()
-        sum_score = self.score.clone().detach().to(device)
+        sum_score = torch.tensor(self.score).to(device)
+        # sum_score = self.score.clone().detach().to(device)
         dist.all_reduce(sum_score, op=dist.ReduceOp.SUM)
         sum_score /= dist.get_world_size()  # Average the score
         self.score = sum_score.item()
